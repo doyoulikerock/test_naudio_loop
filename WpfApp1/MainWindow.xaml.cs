@@ -37,11 +37,14 @@ namespace WpfApp1
             var hwnd = GetWindowHandle(this);
             naudio.Open(hwnd);
 
+            this.Closed += MainWindow_Closed;
             
         }
 
-
-        
+        private void MainWindow_Closed(object sender, EventArgs e)
+        {
+            naudio?.Close();
+        }
 
         public IntPtr GetWindowHandle(Window window)
         {
@@ -50,7 +53,7 @@ namespace WpfApp1
 
         private void Button_Click(object sender, RoutedEventArgs e)
         {
-#if false
+#if true
             naudio.Close();
 
 
@@ -61,6 +64,11 @@ namespace WpfApp1
 
             naudio.openWaveOut((IntPtr)null);
 #endif
+        }
+
+        private void Flush_Click(object sender, RoutedEventArgs e)
+        {
+            naudio.Flush();
         }
     }
 }

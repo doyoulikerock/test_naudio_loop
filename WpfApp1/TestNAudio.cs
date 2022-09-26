@@ -1,13 +1,19 @@
 ﻿#define NAUDIO_WOUT_DIRECTSOUND
 
+#define TEST_DEV_WASAPI
+
+
 
 using log4net;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
+using NAudio.Wave.SampleProviders;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 
@@ -141,16 +147,97 @@ namespace WpfApp1
             wave_out.Play();
         }
 
+#if TEST_DEV_WASAPI
+        IWaveIn newWaveIn;
+
+        IWavePlayer wavePlayer;
+        BufferedWaveProvider write_pcm;
+
+        void open_naudio_WASAPI()
+        {
+            var enumerator = new MMDeviceEnumerator();
+            var endPoints = enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active);
+            foreach (var endPoint in endPoints)
+            {
+                Debug.WriteLine(string.Format("{0} ({1})", endPoint.FriendlyName, endPoint.DeviceFriendlyName));
+            }
+            var dev = endPoints[0];
+            var wascap = new WasapiCapture(dev);
+            
+            
+            newWaveIn = wascap;
+            newWaveIn.WaveFormat = new WaveFormat(16000, 1);
+            newWaveIn.DataAvailable += Src_DataAvailable;
+
+            newWaveIn.StartRecording();
+
+
+
+            BufferedWaveProvider reader = new BufferedWaveProvider(new WaveFormat(16000, 16, 1));
+            //reader.BufferLength = reader.WaveFormat.AverageBytesPerSecond / 2;
+            write_pcm = reader;
+
+            var sampleChannel = new SampleChannel(reader, true);
+            //sampleChannel.PreVolumeMeter += OnPreVolumeMeter;
+            //setVolumeDelegate = vol => sampleChannel.Volume = vol;
+            var wave_provider = new MeteringSampleProvider(sampleChannel);
+            //postVolumeMeter.StreamVolume += OnPostVolumeMeter;
+
+
+            // device
+            enumerator = new MMDeviceEnumerator();
+            endPoints = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
+            foreach (var endPoint in endPoints)
+            {
+                Debug.WriteLine(string.Format("{0} ({1})", endPoint.FriendlyName, endPoint.DeviceFriendlyName));
+            }
+            dev = endPoints[2];
+            wavePlayer = new WasapiOut(
+                dev,
+                AudioClientShareMode.Shared,
+                false,
+                0);
+
+            wavePlayer.Init(wave_provider);
+            wavePlayer.Play();
+
+        }
+#endif
+
+
         private void Src_DataAvailable(object sender, WaveInEventArgs e)
         {
+#if TEST_DEV_WASAPI
+            int avail_size = write_pcm.BufferLength - write_pcm.BufferedBytes;
+            logger.Info($"{cnt++}: waveout avail: {avail_size}, {write_pcm.BufferLength}, {write_pcm.BufferedBytes}, " +
+                $"Rx:{e.BytesRecorded}");
+
+            if (write_pcm != null)
+                write_pcm.AddSamples(e.Buffer, 0, e.BytesRecorded);
+#else
             int avail_size = wave_provider.BufferLength - wave_provider.BufferedBytes;
-            logger.Info($"{cnt++}: waveout avail: {avail_size} bytes");
+            logger.Info($"{cnt++}: waveout avail: {avail_size} bytes, Rx:{e.BytesRecorded}");
 
             wave_provider.AddSamples(e.Buffer, 0, e.BytesRecorded);
+#endif
         }
 
         void close_naudio()
         {
+#if TEST_DEV_WASAPI
+            if (wavePlayer != null)
+            {
+                wavePlayer.Stop();
+                wavePlayer.Dispose();
+                wavePlayer = null;
+            }
+            if (newWaveIn != null)
+            {
+                newWaveIn.StopRecording();
+                newWaveIn.Dispose();
+                newWaveIn = null;
+            }
+#else
             if (wave_out != null)
             {
                 wave_out.Stop();
@@ -163,79 +250,20 @@ namespace WpfApp1
                 src.Dispose();
                 src = null;
             }
-        }
-
-
-        public void openWaveOut(IntPtr hwnd)
-        {
-            try
-            {
-                WaveCallbackStrategy strategy =
-                    WaveCallbackStrategy.FunctionCallback;
-                    //WaveCallbackStrategy.NewWindow;
-                    //WaveCallbackStrategy.ExistingWindow;
-                WaveCallbackInfo callbackInfo = 
-                    strategy == WaveCallbackStrategy.FunctionCallback ? WaveCallbackInfo.FunctionCallback() :
-                    strategy == WaveCallbackStrategy.NewWindow ? WaveCallbackInfo.NewWindow() :
-                    WaveCallbackInfo.ExistingWindow(hwnd) ;
-
-#if NAUDIO_WOUT_DIRECTSOUND
-                m_waveOut = new NAudio.Wave.DirectSoundOut();
-#else
-                m_waveOut = new WaveOut(callbackInfo);
-                ((WaveOut)m_waveOut).DeviceNumber = m_selectedWaveOutIndex;
-                ((WaveOut)m_waveOut).DesiredLatency = 50; //msec 
 #endif
-                m_bufferedWaveProvider = new BufferedWaveProvider(new WaveFormat(16000, 16, 1));
-
-                m_bufferedWaveProvider.BufferDuration =
-                TimeSpan.FromSeconds(20);
-
-
-                m_waveOut.Volume = 1.0f;
-                m_waveOut.Init(m_bufferedWaveProvider);
-
-                m_waveOut.Stop();
-                m_waveOut.Pause();
-                
-                m_waveOut.Play();
-                
-
-            }
-            catch (Exception ex)
-            {
-                throw ex;
-            }
         }
 
-        /// <summary>
-        /// 오디오 출력장치를 닫습니다.
-        /// </summary>
-        public void closeWaveOut()
-        {
-            // close waveOut
-            if (m_waveOut != null)
-            {
-                try
-                {
-                    m_waveOut.Stop();
-                    m_waveOut.Dispose();
-                    m_waveOut = null;
-                }
-                catch (Exception e)
-                {
-                    throw e;
-                }
-            }
-        }
 
 
         public void Open(IntPtr hwnd)
         {
-
+#if TEST_DEV_WASAPI
+            open_naudio_WASAPI();
+#else
             open_naudio();
             //openWaveOut(hwnd);
             //openWaveIn();
+#endif
         }
 
         public void Close()
@@ -247,7 +275,17 @@ namespace WpfApp1
         }
 
 
-        
+        public void Flush()
+        {
+#if TEST_DEV_WASAPI
+            newWaveIn.StopRecording();
+            Thread.Sleep(100);
+            newWaveIn.StartRecording();
+#endif
+        }
+
+
+
 
         private static readonly log4net.ILog logger =
             log4net.LogManager.GetLogger(System.Reflection.MethodBase.GetCurrentMethod().DeclaringType);
@@ -267,6 +305,8 @@ namespace WpfApp1
             }
             return m_instance;
         }
+
+        
     }
 
 }
