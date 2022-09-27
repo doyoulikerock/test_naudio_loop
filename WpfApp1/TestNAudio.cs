@@ -1,7 +1,7 @@
 ﻿#define NAUDIO_WOUT_DIRECTSOUND
 
 #define TEST_DEV_WASAPI
-
+//#define DEBUG_DUMP_PCM
 
 
 using log4net;
@@ -11,6 +11,7 @@ using NAudio.Wave.SampleProviders;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -64,7 +65,11 @@ namespace WpfApp1
         private IEnumerable<MMDevice> m_captureDevices;
         private IEnumerable<MMDevice> m_renderDevices;
 
-
+#if DEBUG_DUMP_PCM
+        BinaryWriter file = new BinaryWriter(File.OpenWrite("capture.pcm"));
+        int frame_cnt=0;
+        int total_len = 0;
+#endif
 
         private void openWaveIn()
         {
@@ -155,23 +160,6 @@ namespace WpfApp1
 
         void open_naudio_WASAPI()
         {
-            var enumerator = new MMDeviceEnumerator();
-            var endPoints = enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active);
-            foreach (var endPoint in endPoints)
-            {
-                Debug.WriteLine(string.Format("{0} ({1})", endPoint.FriendlyName, endPoint.DeviceFriendlyName));
-            }
-            var dev = endPoints[0];
-            var wascap = new WasapiCapture(dev);
-            
-            
-            newWaveIn = wascap;
-            newWaveIn.WaveFormat = new WaveFormat(16000, 1);
-            newWaveIn.DataAvailable += Src_DataAvailable;
-
-            newWaveIn.StartRecording();
-
-
 
             BufferedWaveProvider reader = new BufferedWaveProvider(new WaveFormat(16000, 16, 1));
             //reader.BufferLength = reader.WaveFormat.AverageBytesPerSecond / 2;
@@ -185,27 +173,61 @@ namespace WpfApp1
 
 
             // device
-            enumerator = new MMDeviceEnumerator();
-            endPoints = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
+            var enumerator = new MMDeviceEnumerator();
+            var endPoints = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
             foreach (var endPoint in endPoints)
             {
                 Debug.WriteLine(string.Format("{0} ({1})", endPoint.FriendlyName, endPoint.DeviceFriendlyName));
             }
-            dev = endPoints[2];
+            var dev = endPoints[2];
             wavePlayer = new WasapiOut(
                 dev,
                 AudioClientShareMode.Shared,
-                false,
+                //AudioClientShareMode.Exclusive,
+                true,
                 0);
 
             wavePlayer.Init(wave_provider);
             wavePlayer.Play();
 
+
+
+#if false
+             int dev_idx = 1;
+            src = new WaveIn();
+            src.DeviceNumber = dev_idx;
+            src.WaveFormat = new WaveFormat(16000, 1);
+            src.DataAvailable += Src_DataAvailable;
+            ((WaveIn)src).BufferMilliseconds = 10;            // 10ms 단위로 전송
+            ((WaveIn)src).NumberOfBuffers = 2; //
+            src.StartRecording();
+#else
+
+            enumerator = new MMDeviceEnumerator();
+            endPoints = enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active);
+            foreach (var endPoint in endPoints)
+            {
+                Debug.WriteLine(string.Format("{0} ({1})", endPoint.FriendlyName, endPoint.DeviceFriendlyName));
+            }
+            dev = endPoints[0];
+            var wascap = new WasapiCapture(dev);
+            
+            
+            newWaveIn = wascap;
+            newWaveIn.WaveFormat = new WaveFormat(16000, 1);
+            newWaveIn.DataAvailable += Src_DataAvailable;
+
+            newWaveIn.StartRecording();
+#endif
+
+
+
+
         }
 #endif
 
 
-        private void Src_DataAvailable(object sender, WaveInEventArgs e)
+            private void Src_DataAvailable(object sender, WaveInEventArgs e)
         {
 #if TEST_DEV_WASAPI
             int avail_size = write_pcm.BufferLength - write_pcm.BufferedBytes;
@@ -220,6 +242,21 @@ namespace WpfApp1
 
             wave_provider.AddSamples(e.Buffer, 0, e.BytesRecorded);
 #endif
+
+
+#if DEBUG_DUMP_PCM
+            if (frame_cnt++ < 300)
+            {
+                file.Write(e.Buffer, 0, e.BytesRecorded);
+
+                if (frame_cnt == 300)
+                {
+                    file.Flush();
+                    file.Close();
+                }
+            }
+#endif
+
         }
 
         void close_naudio()
