@@ -1,6 +1,6 @@
 ﻿#define NAUDIO_WOUT_DIRECTSOUND
 
-#define TEST_DEV_WASAPI
+#define TEST_DEV_WASAPI // +15% cpu usage
 //#define DEBUG_DUMP_PCM
 
 
@@ -180,12 +180,21 @@ namespace WpfApp1
                 Debug.WriteLine(string.Format("{0} ({1})", endPoint.FriendlyName, endPoint.DeviceFriendlyName));
             }
             var dev = endPoints[2];
+#if false // too high cpu usage
+            wavePlayer = new WasapiOut(
+                dev,
+                AudioClientShareMode.Shared,
+                //AudioClientShareMode.Exclusive,
+                false,
+                0);
+#else
             wavePlayer = new WasapiOut(
                 dev,
                 AudioClientShareMode.Shared,
                 //AudioClientShareMode.Exclusive,
                 true,
-                0);
+                150);
+#endif
 
             wavePlayer.Init(wave_provider);
             wavePlayer.Play();
